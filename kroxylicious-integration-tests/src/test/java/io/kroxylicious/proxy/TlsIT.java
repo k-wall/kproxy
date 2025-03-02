@@ -363,9 +363,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstream_SuccessfulTlsWithProtocolsAllowed(KafkaCluster cluster) throws Exception {
-        var bootstrapServers = cluster.getBootstrapServers();
-
+    void downstream_SuccessfulTlsWithProtocolsAllowed(KafkaCluster cluster) {
         // Protocol we want to use
         AllowDeny<String> protocols = new AllowDeny<>(List.of("TLSv1.2"), null);
 
@@ -414,9 +412,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstream_UnsuccessfulTlsWithProtocolsAllowed(KafkaCluster cluster) throws Exception {
-        var bootstrapServers = cluster.getBootstrapServers();
-
+    void downstream_UnsuccessfulTlsWithProtocolsAllowed(KafkaCluster cluster) {
         // Protocol we want to use
         AllowDeny<String> protocols = new AllowDeny<>(List.of("TLSv1.2"), null);
 
@@ -448,9 +444,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstream_SuccessfulTlsWithProtocolsDenied(KafkaCluster cluster) throws Exception {
-        var bootstrapServers = cluster.getBootstrapServers();
-
+    void downstream_SuccessfulTlsWithProtocolsDenied(KafkaCluster cluster) {
         // Protocol we want to use
         AllowDeny<String> protocols = new AllowDeny<>(null, Set.of("TLSv1.2"));
 
@@ -560,9 +554,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstream_SuccessfulTlsWithCipherSuitesAllowed(KafkaCluster cluster) throws Exception {
-        var bootstrapServers = cluster.getBootstrapServers();
-
+    void downstream_SuccessfulTlsWithCipherSuitesAllowed(KafkaCluster cluster) {
         // Cipher we want to use
         AllowDeny<String> cipherSuites = new AllowDeny<>(List.of("TLS_CHACHA20_POLY1305_SHA256"), null);
 
@@ -610,9 +602,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstream_UnsuccessfulTlsWithCipherSuitesAllowed(KafkaCluster cluster) throws Exception {
-        var bootstrapServers = cluster.getBootstrapServers();
-
+    void downstream_UnsuccessfulTlsWithCipherSuitesAllowed(KafkaCluster cluster) {
         // Cipher we want to use
         AllowDeny<String> cipherSuites = new AllowDeny<>(List.of("TLS_AES_128_GCM_SHA256"), null);
 
@@ -644,9 +634,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstream_SuccessfulTlsWithCipherSuitesAllowedAndDenied(KafkaCluster cluster) throws Exception {
-        var bootstrapServers = cluster.getBootstrapServers();
-
+    void downstream_SuccessfulTlsWithCipherSuitesAllowedAndDenied(KafkaCluster cluster) {
         // Cipher we want to use
         AllowDeny<String> cipherSuites = new AllowDeny<>(List.of("TLS_CHACHA20_POLY1305_SHA256"), Set.of("TLS_AES_128_GCM_SHA256"));
 
@@ -802,7 +790,7 @@ class TlsIT extends BaseIT {
     }
 
     @Test
-    void downstreamMutualTls_SuccessfulTlsClientAuthRequestedAndNotProvided(KafkaCluster cluster) throws Exception {
+    void downstreamMutualTls_SuccessfulTlsClientAuthRequestedAndNotProvided(KafkaCluster cluster) {
         try (var tester = kroxyliciousTester(constructMutualTlsBuilder(cluster, TlsClientAuth.REQUESTED));
                 var admin = tester.admin("demo",
                         Map.of(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
@@ -845,7 +833,7 @@ class TlsIT extends BaseIT {
         }
     }
 
-    private ConfigurationBuilder constructMutualTlsBuilder(KafkaCluster cluster, TlsClientAuth tlsClientAuth) throws Exception {
+    private ConfigurationBuilder constructMutualTlsBuilder(KafkaCluster cluster, TlsClientAuth tlsClientAuth) {
 
         return new ConfigurationBuilder()
                 .addToVirtualClusters(baseVirtualClusterBuilder(cluster, "demo")

@@ -14,6 +14,7 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
 
+import io.kroxylicious.kubernetes.api.v1alpha1.KafkaClusterRef;
 import io.kroxylicious.kubernetes.api.v1alpha1.KafkaProxy;
 import io.kroxylicious.kubernetes.api.v1alpha1.VirtualKafkaCluster;
 
@@ -33,6 +34,12 @@ public class ResourcesUtil {
     static Stream<VirtualKafkaCluster> clustersInNameOrder(Context<KafkaProxy> context) {
         return context.getSecondaryResources(VirtualKafkaCluster.class)
                 .stream().sorted(Comparator.comparing(virtualKafkaCluster -> virtualKafkaCluster.getMetadata().getName()));
+    }
+
+    // KWTODO - think I should be using a discriminator, so I only consider the refs I need to
+    static Stream<KafkaClusterRef> clusterRefsInNameOrder(Context<KafkaProxy> context) {
+        return context.getSecondaryResource(KafkaClusterRef.class)
+                .stream().sorted(Comparator.comparing(clusterRef -> clusterRef.getMetadata().getName()));
     }
 
 }

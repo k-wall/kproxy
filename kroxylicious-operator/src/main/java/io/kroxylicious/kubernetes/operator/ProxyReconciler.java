@@ -17,6 +17,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.kroxylicious.kubernetes.api.v1alpha1.KafkaClusterRef;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.spi.LoggingEventBuilder;
@@ -304,6 +306,14 @@ public class ProxyReconciler implements EventSourceInitializer<KafkaProxy>,
 
     private static InformerEventSource<?, KafkaProxy> buildVirtualKafkaClusterInformer(EventSourceContext<KafkaProxy> context) {
         InformerConfiguration<VirtualKafkaCluster> configuration = InformerConfiguration.from(VirtualKafkaCluster.class)
+                .withSecondaryToPrimaryMapper(clusterToProxyMapper(context))
+                .withPrimaryToSecondaryMapper(proxyToClusterMapper(context))
+                .build();
+        return new InformerEventSource<>(configuration, context);
+    }
+    private static InformerEventSource<?, KafkaProxy> buildKafkaClusterRefInformer(EventSourceContext<KafkaProxy> context) {
+        InformerConfiguration<KafkaClusterRef> configuration = InformerConfiguration.from(KafkaClusterRef.class)
+//
                 .withSecondaryToPrimaryMapper(clusterToProxyMapper(context))
                 .withPrimaryToSecondaryMapper(proxyToClusterMapper(context))
                 .build();

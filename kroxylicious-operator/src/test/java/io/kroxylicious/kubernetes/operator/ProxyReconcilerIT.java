@@ -31,10 +31,13 @@ import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.javaoperatorsdk.operator.junit.LocallyRunOperatorExtension;
 
+import io.kroxylicious.kubernetes.api.v1alpha1.KafkaClusterRef;
+import io.kroxylicious.kubernetes.api.v1alpha1.KafkaClusterRefBuilder;
 import io.kroxylicious.kubernetes.api.v1alpha1.KafkaProxy;
 import io.kroxylicious.kubernetes.api.v1alpha1.KafkaProxyBuilder;
 import io.kroxylicious.kubernetes.api.v1alpha1.VirtualKafkaCluster;
 import io.kroxylicious.kubernetes.api.v1alpha1.VirtualKafkaClusterBuilder;
+import io.kroxylicious.kubernetes.api.v1alpha1.virtualkafkaclusterspec.targetcluster.ClusterRefBuilder;
 import io.kroxylicious.kubernetes.operator.config.RuntimeDecl;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,12 +49,15 @@ class ProxyReconcilerIT {
 
     public static final String PROXY_A = "proxy-a";
     public static final String PROXY_B = "proxy-b";
+    public static final String CLUSTER_FOO_REF = "fooref";
     public static final String CLUSTER_FOO = "foo";
     public static final String CLUSTER_FOO_BOOTSTRAP = "my-cluster-kafka-bootstrap.foo.svc.cluster.local:9092";
+    public static final String CLUSTER_BAR_REF = "barref";
     public static final String CLUSTER_BAR = "bar";
     public static final String CLUSTER_BAR_BOOTSTRAP = "my-cluster-kafka-bootstrap.bar.svc.cluster.local:9092";
     public static final String NEW_BOOTSTRAP = "new-bootstrap:9092";
     public static final String CLUSTER_BAZ = "baz";
+    public static final String CLUSTER_BAZ_REF = "bazref";
     public static final String CLUSTER_BAZ_BOOTSTRAP = "my-cluster-kafka-bootstrap.baz.svc.cluster.local:9092";
 
     static KubernetesClient client;
@@ -82,6 +88,7 @@ class ProxyReconcilerIT {
             ))))
             .withKubernetesClient(client)
             .withAdditionalCustomResourceDefinition(VirtualKafkaCluster.class)
+            .withAdditionalCustomResourceDefinition(KafkaClusterRef.class)
             .waitForNamespaceDeletion(true)
             .withConfigurationService(x -> x.withCloseClientOnStop(false))
             .build();
@@ -96,23 +103,30 @@ class ProxyReconcilerIT {
         doCreate();
     }
 
-    private record CreatedResources(KafkaProxy proxy, Set<VirtualKafkaCluster> clusters) {
+    private record CreatedResources(KafkaProxy proxy, Set<VirtualKafkaCluster> clusters, Set<KafkaClusterRef> clusterRefs) {
         public VirtualKafkaCluster cluster(String name) {
             return clusters.stream().filter(c -> c.getMetadata().getName().equals(name)).findFirst().orElseThrow();
+        }
+        public KafkaClusterRef clusterRef(String name) {
+            return clusterRefs.stream().filter(c -> c.getMetadata().getName().equals(name)).findFirst().orElseThrow();
         }
     }
 
     CreatedResources doCreate() {
         KafkaProxy proxy = extension.create(kafkaProxy(PROXY_A));
-        VirtualKafkaCluster clusterFoo = extension.create(virtualKafkaCluster(CLUSTER_FOO, CLUSTER_FOO_BOOTSTRAP, proxy));
-        VirtualKafkaCluster clusterBar = extension.create(virtualKafkaCluster(CLUSTER_BAR, CLUSTER_BAR_BOOTSTRAP, proxy));
+        KafkaClusterRef fooClusterRef = extension.create(clusterRef(CLUSTER_FOO_REF, CLUSTER_FOO_BOOTSTRAP));
+        KafkaClusterRef barClusterRef = extension.create(clusterRef(CLUSTER_BAR_REF, CLUSTER_BAR_BOOTSTRAP));
+        Set<KafkaClusterRef> clusterRefs = Set.of(fooClusterRef, barClusterRef);
+
+        VirtualKafkaCluster clusterFoo = extension.create(virtualKafkaCluster(CLUSTER_FOO, CLUSTER_FOO_BOOTSTRAP, proxy, fooClusterRef));
+        VirtualKafkaCluster clusterBar = extension.create(virtualKafkaCluster(CLUSTER_BAR, CLUSTER_BAR_BOOTSTRAP, proxy, barClusterRef));
         Set<VirtualKafkaCluster> clusters = Set.of(clusterFoo, clusterBar);
 
         assertProxyConfigContents(proxy, Set.of(CLUSTER_FOO_BOOTSTRAP, CLUSTER_BAR_BOOTSTRAP), Set.of());
         assertDeploymentMountsConfigSecret(proxy);
         assertDeploymentBecomesReady(proxy);
         assertServiceTargetsProxyInstances(proxy, clusters);
-        return new CreatedResources(proxy, clusters);
+        return new CreatedResources(proxy, clusters, clusterRefs);
     }
 
     private void assertDeploymentBecomesReady(KafkaProxy proxy) {
@@ -193,12 +207,12 @@ class ProxyReconcilerIT {
     }
 
     @Test
-    void testUpdateVirtualCluster() {
+    void testUpdateVirtualClusterTargetBootstrap() {
         final var createdResources = doCreate();
         KafkaProxy proxy = createdResources.proxy;
-        VirtualKafkaCluster cluster = createdResources.cluster(CLUSTER_FOO).edit().editSpec().editTargetCluster().editBootstrapping().withBootstrapAddress(NEW_BOOTSTRAP)
-                .endBootstrapping().endTargetCluster().endSpec().build();
-        extension.replace(cluster);
+        var clusterRef = createdResources.clusterRef(CLUSTER_FOO_REF).edit().editSpec().withBootstrapServers(NEW_BOOTSTRAP).endSpec().build();
+        extension.replace(clusterRef);
+
         assertDeploymentBecomesReady(proxy);
         await().untilAsserted(() -> {
             var secret = extension.get(Secret.class, ProxyConfigSecret.secretName(proxy));
@@ -223,7 +237,8 @@ class ProxyReconcilerIT {
     void testAddVirtualCluster() {
         final var createdResources = doCreate();
         KafkaProxy proxy = createdResources.proxy;
-        extension.create(virtualKafkaCluster(CLUSTER_BAZ, CLUSTER_BAZ_BOOTSTRAP, proxy));
+        KafkaClusterRef bazClusterRef = extension.create(clusterRef(CLUSTER_BAR_REF, CLUSTER_BAZ_BOOTSTRAP));
+        extension.create(virtualKafkaCluster(CLUSTER_BAZ, CLUSTER_BAZ_BOOTSTRAP, proxy, bazClusterRef));
         await().untilAsserted(() -> {
             var secret = extension.get(Secret.class, ProxyConfigSecret.secretName(proxy));
             assertThat(secret)
@@ -279,16 +294,21 @@ class ProxyReconcilerIT {
         // given
         KafkaProxy proxyA = extension.create(kafkaProxy(PROXY_A));
         KafkaProxy proxyB = extension.create(kafkaProxy(PROXY_B));
-        extension.create(virtualKafkaCluster(CLUSTER_FOO, CLUSTER_FOO_BOOTSTRAP, proxyA));
-        extension.create(virtualKafkaCluster(CLUSTER_BAR, CLUSTER_BAR_BOOTSTRAP, proxyA));
-        extension.create(virtualKafkaCluster(CLUSTER_BAZ, CLUSTER_BAZ_BOOTSTRAP, proxyB));
+
+        KafkaClusterRef fooClusterRef = extension.create(clusterRef(CLUSTER_FOO_REF, CLUSTER_FOO_BOOTSTRAP));
+        KafkaClusterRef barClusterRef = extension.create(clusterRef(CLUSTER_BAR_REF, CLUSTER_BAR_BOOTSTRAP));
+        KafkaClusterRef bazClusterRef = extension.create(clusterRef(CLUSTER_BAZ_REF, CLUSTER_BAZ_BOOTSTRAP));
+
+        extension.create(virtualKafkaCluster(CLUSTER_FOO, CLUSTER_FOO_BOOTSTRAP, proxyA, fooClusterRef));
+        extension.create(virtualKafkaCluster(CLUSTER_BAR, CLUSTER_BAR_BOOTSTRAP, proxyA, barClusterRef));
+        extension.create(virtualKafkaCluster(CLUSTER_BAZ, CLUSTER_BAZ_BOOTSTRAP, proxyB, bazClusterRef));
         assertProxyConfigContents(proxyA, Set.of(CLUSTER_FOO_BOOTSTRAP, CLUSTER_BAR_BOOTSTRAP), Set.of());
         assertProxyConfigContents(proxyB, Set.of(CLUSTER_BAZ_BOOTSTRAP), Set.of());
         assertClusterServiceExists(proxyA, CLUSTER_FOO);
         assertClusterServiceExists(proxyA, CLUSTER_BAR);
         assertClusterServiceExists(proxyB, CLUSTER_BAZ);
         // when
-        extension.replace(virtualKafkaCluster(CLUSTER_BAR, CLUSTER_BAR_BOOTSTRAP, proxyB));
+        extension.replace(virtualKafkaCluster(CLUSTER_BAR, CLUSTER_BAR_BOOTSTRAP, proxyB, fooClusterRef));
         // then
         assertDeploymentBecomesReady(proxyA);
         assertDeploymentBecomesReady(proxyB);
@@ -300,14 +320,21 @@ class ProxyReconcilerIT {
         assertClusterServiceExists(proxyB, CLUSTER_BAZ);
     }
 
-    private static VirtualKafkaCluster virtualKafkaCluster(String clusterName, String clusterBootstrap, KafkaProxy proxy) {
+    private static VirtualKafkaCluster virtualKafkaCluster(String clusterName, String clusterBootstrap, KafkaProxy proxy, KafkaClusterRef clusterRef) {
         return new VirtualKafkaClusterBuilder().withNewMetadata().withName(clusterName).endMetadata()
                 .withNewSpec()
                 .withNewTargetCluster()
-                .withNewBootstrapping().withBootstrapAddress(clusterBootstrap).endBootstrapping()
+                .withClusterRef(new ClusterRefBuilder().withName(clusterRef.getMetadata().getName()).build())
                 .endTargetCluster()
                 .withNewProxyRef().withName(proxy.getMetadata().getName()).endProxyRef()
                 .withFilters()
+                .endSpec().build();
+    }
+
+    private static KafkaClusterRef clusterRef(String clusterRefName, String clusterBootstrap) {
+        return new KafkaClusterRefBuilder().withNewMetadata().withName(clusterRefName).endMetadata()
+                .withNewSpec()
+                .withBootstrapServers(clusterBootstrap)
                 .endSpec().build();
     }
 

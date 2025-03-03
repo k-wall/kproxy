@@ -27,6 +27,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.processing.dependent.kubernetes.CRUDKubernetesDependentResource;
 import io.javaoperatorsdk.operator.processing.dependent.kubernetes.KubernetesDependent;
 
+import io.kroxylicious.kubernetes.api.v1alpha1.KafkaClusterRef;
 import io.kroxylicious.kubernetes.api.v1alpha1.KafkaProxy;
 import io.kroxylicious.kubernetes.api.v1alpha1.VirtualKafkaCluster;
 import io.kroxylicious.kubernetes.api.v1alpha1.virtualkafkaclusterspec.Filters;
@@ -103,9 +104,11 @@ public class ProxyConfigSecret
 
         List<VirtualKafkaCluster> virtualKafkaClusters = ResourcesUtil.clustersInNameOrder(context).toList();
 
+        List<KafkaClusterRef> clusterRefs = ResourcesUtil.clusterRefsInNameOrder(context).toList();
+
         List<NamedFilterDefinition> filterDefinitions = buildFilterDefinitions(context, virtualKafkaClusters);
 
-        var virtualClusters = buildVirtualClusters(primary, context, virtualKafkaClusters);
+        var virtualClusters = buildVirtualClusters(primary, context, virtualKafkaClusters, clusterRefs);
 
         Configuration configuration = new Configuration(
                 new AdminHttpConfiguration(null, null, new EndpointsConfiguration(new PrometheusMetricsConfig())), filterDefinitions,
@@ -119,13 +122,14 @@ public class ProxyConfigSecret
     }
 
     @NonNull
-    private static LinkedHashMap<String, VirtualCluster> buildVirtualClusters(KafkaProxy primary, Context<KafkaProxy> context, List<VirtualKafkaCluster> clusters) {
+    private static LinkedHashMap<String, VirtualCluster> buildVirtualClusters(KafkaProxy primary, Context<KafkaProxy> context, List<VirtualKafkaCluster> clusters,
+                                                                              List<KafkaClusterRef> clusterRefs) {
         AtomicInteger clusterNum = new AtomicInteger(0);
         var virtualClusters = clusters.stream()
                 .filter(cluster -> !SharedKafkaProxyContext.isBroken(context, cluster))
                 .collect(Collectors.toMap(
                         (cluster) -> cluster.getMetadata().getName(),
-                        cluster -> getVirtualCluster(primary, cluster, clusterNum.getAndIncrement()),
+                        cluster -> getVirtualCluster(primary, cluster, clusterNum.getAndIncrement(), clusterRefs),
                         (v1, v2) -> v1, // Dupes handled below
                         LinkedHashMap::new));
         return virtualClusters;
@@ -210,8 +214,16 @@ public class ProxyConfigSecret
 
     private static VirtualCluster getVirtualCluster(KafkaProxy primary,
                                                     VirtualKafkaCluster cluster,
-                                                    int clusterNum) {
-        String bootstrap = cluster.getSpec().getTargetCluster().getBootstrapping().getBootstrapAddress();
+                                                    int clusterNum, List<KafkaClusterRef> clusterRefs) {
+
+        var ref = clusterRefs.stream().filter(cr -> cr.getMetadata().getName().equals(cluster.getSpec().getTargetCluster().getClusterRef().getName())).findFirst();
+
+        if (ref.isEmpty()) {
+            // I should be a condition
+            throw new IllegalStateException("boom!");
+        }
+
+        String bootstrap = ref.get().getSpec().getBootstrapServers();
         return new VirtualCluster(
                 new TargetCluster(bootstrap, Optional.empty()),
                 null,
